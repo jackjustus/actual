@@ -357,6 +357,42 @@ async function downloadAkahuTransactions(
   return retVal;
 }
 
+async function downloadPlaidTransactions(
+  acctId: AccountEntity['id'],
+  since: string,
+) {
+  const userToken = await asyncStorage.getItem('user-token');
+  if (!userToken) return;
+
+  logger.log('Pulling transactions from Plaid');
+
+  const res = await post(
+    getServer().PLAID_SERVER + '/transactions',
+    {
+      accountId: acctId,
+      startDate: since,
+    },
+    {
+      'X-ACTUAL-TOKEN': userToken,
+    },
+    // the first sync after Plaid's historical pull can be slow
+    300000,
+  );
+
+  if (res.error_code) {
+    throw BankSyncError(res.error_type, res.error_code);
+  } else if ('error' in res) {
+    throw BankSyncError('Connection', res.error);
+  }
+
+  const singleRes = res as BankSyncResponse;
+  return {
+    transactions: singleRes.transactions.all,
+    accountBalance: singleRes.balances,
+    startingBalance: singleRes.startingBalance,
+  };
+}
+
 async function downloadEnableBankingTransactions(
   acctId: string,
   since: string,
@@ -1173,7 +1209,10 @@ async function processBankSyncDownload(
         return total - amountToInteger(trans.transactionAmount.amount);
       }, currentBalance);
       balanceToUse = previousBalance;
-    } else if (acctRow.account_sync_source === 'akahu') {
+    } else if (
+      acctRow.account_sync_source === 'akahu' ||
+      acctRow.account_sync_source === 'plaid'
+    ) {
       const currentBalance = download.startingBalance;
       const previousBalance = transactions.reduce(
         (total, trans) =>
@@ -1281,6 +1320,8 @@ export async function syncAccount(
     );
   } else if (acctRow.account_sync_source === 'akahu') {
     download = await downloadAkahuTransactions(acctId, syncStartDate);
+  } else if (acctRow.account_sync_source === 'plaid') {
+    download = await downloadPlaidTransactions(acctId, syncStartDate);
   } else if (acctRow.account_sync_source === 'goCardless') {
     download = await downloadGoCardlessTransactions(
       userId,

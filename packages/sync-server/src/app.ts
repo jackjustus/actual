@@ -16,6 +16,7 @@ import * as corsApp from './app-cors-proxy';
 import * as enableBankingApp from './app-enablebanking/app-enablebanking';
 import * as goCardlessApp from './app-gocardless/app-gocardless';
 import * as openidApp from './app-openid';
+import * as plaidApp from './app-plaid/app-plaid';
 import * as pluggai from './app-pluggyai/app-pluggyai';
 import * as secretApp from './app-secrets';
 import * as simpleFinApp from './app-simplefin/app-simplefin';
@@ -69,6 +70,7 @@ app.use('/gocardless', goCardlessApp.handlers);
 app.use('/simplefin', simpleFinApp.handlers);
 app.use('/pluggyai', pluggai.handlers);
 app.use('/akahu', akahuApp.handlers);
+app.use('/plaid', plaidApp.handlers);
 app.use('/enablebanking', enableBankingApp.handlers);
 app.use('/secret', secretApp.handlers);
 

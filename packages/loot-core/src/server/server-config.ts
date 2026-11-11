@@ -9,6 +9,7 @@ type ServerConfig = {
   SIMPLEFIN_SERVER: string;
   PLUGGYAI_SERVER: string;
   AKAHU_SERVER: string;
+  PLAID_SERVER: string;
   ENABLEBANKING_SERVER: string;
 };
 
@@ -48,6 +49,7 @@ export function getServer(url?: string): ServerConfig | null {
         SIMPLEFIN_SERVER: joinURL(url, '/simplefin'),
         PLUGGYAI_SERVER: joinURL(url, '/pluggyai'),
         AKAHU_SERVER: joinURL(url, '/akahu'),
+        PLAID_SERVER: joinURL(url, '/plaid'),
         ENABLEBANKING_SERVER: joinURL(url, '/enablebanking'),
       };
     } catch (error) {

@@ -16,11 +16,13 @@ import { useCurrentAccess } from '#hooks/useCurrentAccess';
 import { useEnableBankingStatus } from '#hooks/useEnableBankingStatus';
 import { useFeatureFlag } from '#hooks/useFeatureFlag';
 import { useGoCardlessStatus } from '#hooks/useGoCardlessStatus';
+import { usePlaidStatus } from '#hooks/usePlaidStatus';
 import { usePluggyAiStatus } from '#hooks/usePluggyAiStatus';
 import { useSimpleFinStatus } from '#hooks/useSimpleFinStatus';
 import { useSyncServerStatus } from '#hooks/useSyncServerStatus';
 import { pushModal } from '#modals/modalsSlice';
 import { addNotification } from '#notifications/notificationsSlice';
+import { linkPlaidBank } from '#plaid';
 import { useDispatch } from '#redux';
 
 import { BUILT_IN_BANK_SYNC_PROVIDERS } from './bankSyncUtils';
@@ -116,12 +118,14 @@ export function useBuiltInBankSyncProviders({
   const [loadingSimpleFinAccounts, setLoadingSimpleFinAccounts] =
     useState(false);
   const [loadingAkahuAccounts, setLoadingAkahuAccounts] = useState(false);
+  const [loadingPlaid, setLoadingPlaid] = useState(false);
 
   const enableBankingEnabled = useFeatureFlag('enableBanking');
   const { configuredGoCardless } = useGoCardlessStatus();
   const { simpleFinStatus, setSimpleFinStatus } = useSimpleFinStatus();
   const { pluggyAiStatus, setPluggyAiStatus } = usePluggyAiStatus();
   const { configuredAkahu } = useAkahuStatus();
+  const { configuredPlaid } = usePlaidStatus();
   const { configuredEnableBanking, isLoading: isEnableBankingLoading } =
     useEnableBankingStatus(enableBankingEnabled);
 
@@ -655,12 +659,64 @@ export function useBuiltInBankSyncProviders({
     t,
   ]);
 
+  // Plaid keys live in the server environment, so there is nothing to
+  // configure from the UI.
+  const onPlaidInit = useCallback(() => {
+    dispatch(
+      addNotification({
+        notification: {
+          type: 'warning',
+          title: t('Plaid is not configured'),
+          message: t(
+            'Set PLAID_CLIENT_ID, PLAID_SECRET, PLAID_ENV and PLAID_TOKEN_KEY in the sync server environment, then restart it.',
+          ),
+          sticky: true,
+        },
+      }),
+    );
+  }, [dispatch, t]);
+
+  const onConnectPlaid = useCallback(async () => {
+    if (!configuredPlaid) {
+      onPlaidInit();
+      return;
+    }
+    if (loadingPlaid) return;
+    setLoadingPlaid(true);
+    await linkPlaidBank(dispatch, upgradingAccountId).finally(() =>
+      setLoadingPlaid(false),
+    );
+  }, [
+    configuredPlaid,
+    dispatch,
+    loadingPlaid,
+    onPlaidInit,
+    upgradingAccountId,
+  ]);
+
+  const onPlaidReset = useCallback(async () => {
+    if (
+      !window.confirm(
+        t(
+          'Disconnect every bank linked through Plaid? Linked accounts in Actual stop syncing until you link them again.',
+        ),
+      )
+    ) {
+      return;
+    }
+    const res = await send('plaid-remove-items');
+    if (res && 'error' in res && res.error) {
+      notifyResetFailure('Plaid', new Error(res.reason ?? res.error));
+    }
+  }, [notifyResetFailure, t]);
+
   const configuredProviders = {
     goCardless: Boolean(isGoCardlessSetupComplete),
     simpleFin: Boolean(simpleFinStatus.configured),
     pluggyai: Boolean(pluggyAiStatus.configured),
     enableBanking: Boolean(isEnableBankingSetupComplete),
     akahu: Boolean(isAkahuSetupComplete),
+    plaid: Boolean(configuredPlaid),
   } satisfies Record<BankSyncProviders, boolean>;
 
   const providers = useMemo<BuiltInBankSyncProviderState[]>(() => {
@@ -737,6 +793,22 @@ export function useBuiltInBankSyncProviders({
       onReset: onAkahuReset,
     });
 
+    baseProviders.push({
+      id: 'plaid',
+      displayName: 'Plaid',
+      description: t(
+        'Link a US bank or credit card account to automatically download transactions.',
+      ),
+      isConfigured: configuredProviders.plaid,
+      credentialSource: 'global',
+      supportsPerBudgetFile: false,
+      canConfigure: canConfigureProviders,
+      isLoading: loadingPlaid,
+      onConfigure: onPlaidInit,
+      onLink: onConnectPlaid,
+      onReset: onPlaidReset,
+    });
+
     if (enableBankingEnabled) {
       baseProviders.push({
         id: 'enableBanking',
@@ -765,6 +837,11 @@ export function useBuiltInBankSyncProviders({
     configuredProviders.pluggyai,
     configuredProviders.simpleFin,
     configuredProviders.akahu,
+    configuredProviders.plaid,
+    loadingPlaid,
+    onConnectPlaid,
+    onPlaidInit,
+    onPlaidReset,
     pluggyAiStatus,
     simpleFinStatus,
     syncServerStatus,

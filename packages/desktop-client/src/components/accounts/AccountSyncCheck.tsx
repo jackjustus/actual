@@ -18,6 +18,7 @@ import { useAccounts } from '#hooks/useAccounts';
 import { useCurrentAccess } from '#hooks/useCurrentAccess';
 import { useFailedAccounts } from '#hooks/useFailedAccounts';
 import { pushModal } from '#modals/modalsSlice';
+import { reconnectPlaidAccount } from '#plaid';
 import { useDispatch } from '#redux';
 
 function useErrorMessage() {
@@ -122,6 +123,8 @@ export function AccountSyncCheck() {
           void authorizeEnableBanking(dispatch);
         } else if (acc.account_sync_source === 'goCardless') {
           void authorizeGoCardless(dispatch);
+        } else if (acc.account_sync_source === 'plaid') {
+          void reconnectPlaidAccount(dispatch, acc);
         }
       }
     },

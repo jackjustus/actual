@@ -119,3 +119,20 @@ actual.config.js
 
 # Mac App Store provisioning profiles, downloaded per machine
 packages/desktop-electron/mas/*.provisionprofile
+
+# Secrets: env files hold API keys (Plaid, Akahu, etc.) - never commit them
+.env
+.env.*
+*.env
+!.env.example
+*.pem
+*.key
+*.p12
+*.crt
+
+# Local sync-server data (budgets, account.sqlite with bank tokens)
+server-files/
+user-files/
+
+# Personal working notes for this fork
+PLAID_PLAN.md

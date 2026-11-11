@@ -8,3 +8,15 @@
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Keep secrets and local data out of the build context / image layers
+**/.env
+**/.env.*
+**/*.env
+**/*.pem
+**/*.key
+**/server-files
+**/user-files
+/data
+.claude
+PLAID_PLAN.md

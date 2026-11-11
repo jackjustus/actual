@@ -35,6 +35,7 @@ import type {
   SyncServerAkahuAccount,
   SyncServerEnableBankingAccount,
   SyncServerGoCardlessAccount,
+  SyncServerPlaidAccount,
   SyncServerPluggyAiAccount,
   SyncServerSimpleFinAccount,
   TransactionEntity,
@@ -61,6 +62,7 @@ export type AccountHandlers = {
   'simplefin-accounts-link': typeof linkSimpleFinAccount;
   'pluggyai-accounts-link': typeof linkPluggyAiAccount;
   'akahu-accounts-link': typeof linkAkahuAccount;
+  'plaid-accounts-link': typeof linkPlaidAccount;
   'enablebanking-accounts-link': typeof linkEnableBankingAccount;
   'account-create': typeof createAccount;
   'account-close': typeof closeAccount;
@@ -74,6 +76,11 @@ export type AccountHandlers = {
   'simplefin-status': typeof simpleFinStatus;
   'pluggyai-status': typeof pluggyAiStatus;
   'akahu-status': typeof akahuStatus;
+  'plaid-status': typeof plaidStatus;
+  'plaid-link-start': typeof plaidLinkStart;
+  'plaid-link-poll': typeof plaidLinkPoll;
+  'plaid-link-poll-stop': typeof stopPlaidLinkPolling;
+  'plaid-remove-items': typeof plaidRemoveItems;
   'enablebanking-status': typeof enableBankingStatus;
   'enablebanking-aspsps': typeof enableBankingAspsps;
   'enablebanking-start-auth': typeof enableBankingStartAuth;
@@ -84,6 +91,7 @@ export type AccountHandlers = {
   'simplefin-accounts': typeof simpleFinAccounts;
   'pluggyai-accounts': typeof pluggyAiAccounts;
   'akahu-accounts': typeof akahuAccounts;
+  'plaid-accounts': typeof plaidAccounts;
   'gocardless-get-banks': typeof getGoCardlessBanks;
   'gocardless-create-web-token': typeof createGoCardlessWebToken;
   'accounts-bank-sync': typeof accountsBankSync;
@@ -442,6 +450,77 @@ async function linkAkahuAccount({
       bank: bank.id,
       offbudget: offBudget ? 1 : 0,
       account_sync_source: 'akahu',
+    });
+    await db.insertPayee({
+      name: '',
+      transfer_acct: id,
+    });
+  }
+
+  const syncRes = await bankSync.syncAccount(
+    undefined,
+    undefined,
+    id,
+    externalAccount.account_id,
+    bank.bank_id,
+    startingDate,
+    startingBalance,
+  );
+
+  await handleSyncResponse(syncRes, id);
+
+  connection.send('sync-event', {
+    type: 'success',
+    tables: ['transactions'],
+  });
+
+  return 'ok';
+}
+
+async function linkPlaidAccount({
+  externalAccount,
+  upgradingId,
+  offBudget = false,
+  startingDate,
+  startingBalance,
+}: LinkAccountBaseParams & {
+  externalAccount: SyncServerPlaidAccount;
+}) {
+  let id;
+
+  const bank = await link.findOrCreateBank(
+    { name: externalAccount.institution },
+    externalAccount.item_id,
+  );
+
+  if (upgradingId) {
+    const accRow = await db.first<db.DbAccount>(
+      'SELECT * FROM accounts WHERE id = ?',
+      [upgradingId],
+    );
+
+    if (!accRow) {
+      throw new Error(`Account with ID ${upgradingId} not found.`);
+    }
+
+    id = accRow.id;
+    await db.update('accounts', {
+      id,
+      account_id: externalAccount.account_id,
+      bank: bank.id,
+      account_sync_source: 'plaid',
+    });
+  } else {
+    id = uuidv4();
+    await db.insertWithUUID('accounts', {
+      id,
+      account_id: externalAccount.account_id,
+      mask: externalAccount.mask,
+      name: externalAccount.name,
+      official_name: externalAccount.official_name ?? externalAccount.name,
+      bank: bank.id,
+      offbudget: offBudget ? 1 : 0,
+      account_sync_source: 'plaid',
     });
     await db.insertPayee({
       name: '',
@@ -1042,6 +1121,118 @@ async function akahuAccounts() {
   } catch {
     return { error_code: 'TIMED_OUT' };
   }
+}
+
+async function plaidPost(path: string, body: object = {}, timeout = 60000) {
+  const userToken = await asyncStorage.getItem('user-token');
+
+  if (!userToken) {
+    return { error: 'unauthorized' };
+  }
+
+  const serverConfig = getServer();
+  if (!serverConfig) {
+    throw new Error('Failed to get server config.');
+  }
+
+  try {
+    return await post(
+      serverConfig.PLAID_SERVER + path,
+      body,
+      { 'X-ACTUAL-TOKEN': userToken },
+      timeout,
+    );
+  } catch {
+    return { error_code: 'TIMED_OUT' };
+  }
+}
+
+async function plaidStatus() {
+  return plaidPost('/status');
+}
+
+async function plaidAccounts() {
+  return plaidPost('/accounts', {}, 120000);
+}
+
+async function plaidRemoveItems() {
+  return plaidPost('/remove-items', {}, 120000);
+}
+
+/**
+ * Starts a Plaid Link session on the server. With an accountId (or itemId)
+ * the session is update mode for that bank connection. Returns the URL of
+ * the Link page to open in a new tab.
+ */
+async function plaidLinkStart({
+  accountId,
+  itemId,
+}: { accountId?: string; itemId?: string } = {}) {
+  const res = await plaidPost('/link-session', { accountId, itemId });
+  if (!res || 'error' in res || 'error_code' in res) {
+    return res as {
+      error?: string;
+      error_type?: string;
+      error_code?: string;
+      reason?: string;
+    };
+  }
+  const serverConfig = getServer();
+  if (!serverConfig) {
+    throw new Error('Failed to get server config.');
+  }
+  const { sessionId } = res as { sessionId: string };
+  return {
+    sessionId,
+    url: serverConfig.PLAID_SERVER + '/link/' + sessionId,
+  };
+}
+
+let stopPlaidPolling = false;
+
+/**
+ * Wait for the Link tab to finish. Resolves with the final status:
+ * 'complete' (bank connected, history imported), 'exited' (closed Link),
+ * 'error', or 'timeout'.
+ */
+async function plaidLinkPoll({ sessionId }: { sessionId: string }): Promise<{
+  status: 'complete' | 'exited' | 'error' | 'expired' | 'timeout' | 'stopped';
+  duplicate?: boolean;
+  error?: { error_type: string; error_code: string; reason: string } | null;
+}> {
+  stopPlaidPolling = false;
+  const startTime = Date.now();
+
+  for (;;) {
+    if (stopPlaidPolling) return { status: 'stopped' };
+    if (Date.now() - startTime >= 1000 * 60 * 15) return { status: 'timeout' };
+
+    const res = (await plaidPost('/link-session/poll', { sessionId })) as {
+      status?: string;
+      duplicate?: boolean;
+      error?: { error_type: string; error_code: string; reason: string };
+    };
+
+    if (
+      res?.status === 'complete' ||
+      res?.status === 'exited' ||
+      res?.status === 'error' ||
+      res?.status === 'expired'
+    ) {
+      return {
+        status: res.status,
+        duplicate: res.duplicate,
+        error: res.error,
+      };
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+}
+
+async function stopPlaidLinkPolling() {
+  stopPlaidPolling = true;
+  return 'ok';
 }
 
 async function enableBankingStatus() {
@@ -1800,6 +1991,7 @@ app.method('gocardless-accounts-link', linkGoCardlessAccount);
 app.method('simplefin-accounts-link', linkSimpleFinAccount);
 app.method('pluggyai-accounts-link', linkPluggyAiAccount);
 app.method('akahu-accounts-link', linkAkahuAccount);
+app.method('plaid-accounts-link', linkPlaidAccount);
 app.method('enablebanking-accounts-link', linkEnableBankingAccount);
 app.method('account-create', mutator(undoable(createAccount)));
 app.method('account-close', mutator(closeAccount));
@@ -1813,6 +2005,11 @@ app.method('gocardless-status', goCardlessStatus);
 app.method('simplefin-status', simpleFinStatus);
 app.method('pluggyai-status', pluggyAiStatus);
 app.method('akahu-status', akahuStatus);
+app.method('plaid-status', plaidStatus);
+app.method('plaid-link-start', plaidLinkStart);
+app.method('plaid-link-poll', plaidLinkPoll);
+app.method('plaid-link-poll-stop', stopPlaidLinkPolling);
+app.method('plaid-remove-items', plaidRemoveItems);
 app.method('enablebanking-status', enableBankingStatus);
 app.method('enablebanking-aspsps', enableBankingAspsps);
 app.method('enablebanking-start-auth', enableBankingStartAuth);
@@ -1823,6 +2020,7 @@ app.method('enablebanking-configure', enableBankingConfigure);
 app.method('simplefin-accounts', simpleFinAccounts);
 app.method('pluggyai-accounts', pluggyAiAccounts);
 app.method('akahu-accounts', akahuAccounts);
+app.method('plaid-accounts', plaidAccounts);
 app.method('gocardless-get-banks', getGoCardlessBanks);
 app.method('gocardless-create-web-token', createGoCardlessWebToken);
 app.method('accounts-bank-sync', accountsBankSync);

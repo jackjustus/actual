@@ -203,6 +203,7 @@ __metadata:
     migrate: "npm:^2.1.0"
     nodemon: "npm:^3.1.14"
     openid-client: "npm:^5.7.1"
+    plaid: "npm:^51.0.0"
     pluggy-sdk: "npm:^0.92.0"
     supertest: "npm:^7.3.1"
     typescript-strict-plugin: "npm:^2.4.4"
@@ -10563,7 +10564,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"axios@npm:^1.20.0":
+"axios@npm:^1.20.0, axios@npm:^1.7.4":
   version: 1.21.0
   resolution: "axios@npm:1.21.0"
   dependencies:
@@ -21935,6 +21936,15 @@ __metadata:
     pvutils: "npm:^1.1.3"
     tslib: "npm:^2.8.1"
   checksum: 10/1d3c6d74326572e8ecd9b0d57d51fa86ff48b9977d1a51ae4bb0a63ed77eb97c5807286be17d9b0eae0c4ccfa82488f32a328eb66af47c7888c2c8d0a07c6236
+  languageName: node
+  linkType: hard
+
+"plaid@npm:^51.0.0":
+  version: 51.0.0
+  resolution: "plaid@npm:51.0.0"
+  dependencies:
+    axios: "npm:^1.7.4"
+  checksum: 10/3a300c4968b746915f4da9fc360d3c7662c883764ee868bede17ede89fe973109d8a5f8836b2c200c53a3087de08c90aaf0766c788f810066146938b6e8f5beb
   languageName: node
   linkType: hard
 
