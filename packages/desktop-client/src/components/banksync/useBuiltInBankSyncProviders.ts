@@ -662,6 +662,21 @@ export function useBuiltInBankSyncProviders({
   // Plaid keys live in the server environment, so there is nothing to
   // configure from the UI.
   const onPlaidInit = useCallback(() => {
+    if (configuredPlaid) {
+      dispatch(
+        addNotification({
+          notification: {
+            type: 'message',
+            title: t('Plaid is configured'),
+            message: t(
+              'Plaid keys are set in the sync server environment. Use Link bank account to connect a bank.',
+            ),
+            timeout: 5000,
+          },
+        }),
+      );
+      return;
+    }
     dispatch(
       addNotification({
         notification: {
@@ -674,7 +689,7 @@ export function useBuiltInBankSyncProviders({
         },
       }),
     );
-  }, [dispatch, t]);
+  }, [configuredPlaid, dispatch, t]);
 
   const onConnectPlaid = useCallback(async () => {
     if (!configuredPlaid) {
